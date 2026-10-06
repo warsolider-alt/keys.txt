@@ -8282,6 +8282,7 @@ reg("chams_mode", {
 })
 reg("fov_ring", {
     toggle_on = function()
+        State.fov_ring = true
         startTick("fov_ring", 0, function()
             if not State.fov_ring then return end
             local sw, sh = screenSize()
@@ -8291,7 +8292,7 @@ reg("fov_ring", {
             Draw.DrawCircle(sw/2, sh/2, size, 255, 255, 255, math.floor(opacity), false)
         end)
     end,
-    toggle_off = function() stopTick("fov_ring") end,
+    toggle_off = function() State.fov_ring = false; stopTick("fov_ring") end,
 })
 reg("fov_size",    { slide = function(v) State.fov_size    = v end })
 reg("fov_opacity", { slide = function(v) State.fov_opacity = v end })
