@@ -8287,8 +8287,8 @@ reg("fov_ring", {
             if not State.fov_ring then return end
             local sw, sh = screenSize()
             if not Draw or type(Draw.DrawCircle) ~= "function" then return end
-            local size    = (State.fov_size    or 10) / 100 * math.min(sw, sh)
-            local opacity = (State.fov_opacity or 50) * 2.55
+            local size    = (tonumber(State.fov_size) or 10) / 100 * math.min(sw, sh)
+            local opacity = (tonumber(State.fov_opacity) or 50) * 2.55
             Draw.DrawCircle(sw/2, sh/2, size, 255, 255, 255, math.floor(opacity), false)
         end)
     end,
