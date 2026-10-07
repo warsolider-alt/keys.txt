@@ -8280,19 +8280,27 @@ reg("chams_mode", {
         end)
     end,
 })
+Omen.__fovRingTick = function()
+    if not (State.fov_ring or State.fov_visible) then return end
+    local sw, sh = screenSize()
+    local size    = (tonumber(State.fov_size) or 10) / 100 * math.min(sw, sh)
+    local opacity = math.floor((tonumber(State.fov_opacity) or 50) * 2.55)
+    if Draw and type(Draw.DrawCircle) == "function" then
+        Draw.DrawCircle(sw/2, sh/2, size, 255, 255, 255, opacity, false)
+    elseif type(DrawRect) == "function" then
+        -- Executor has no Drawing.DrawCircle: approximate the ring with native
+        -- DrawRect dots (normalized screen coords).
+        local seg = 72
+        for i = 0, seg - 1 do
+            local a = (i / seg) * math.pi * 2
+            DrawRect(0.5 + math.cos(a) * size / sw, 0.5 + math.sin(a) * size / sh,
+                     3 / sw, 3 / sh, 255, 255, 255, opacity)
+        end
+    end
+end
 reg("fov_ring", {
-    toggle_on = function()
-        State.fov_ring = true
-        startTick("fov_ring", 0, function()
-            if not State.fov_ring then return end
-            local sw, sh = screenSize()
-            if not Draw or type(Draw.DrawCircle) ~= "function" then return end
-            local size    = (tonumber(State.fov_size) or 10) / 100 * math.min(sw, sh)
-            local opacity = (tonumber(State.fov_opacity) or 50) * 2.55
-            Draw.DrawCircle(sw/2, sh/2, size, 255, 255, 255, math.floor(opacity), false)
-        end)
-    end,
-    toggle_off = function() State.fov_ring = false; stopTick("fov_ring") end,
+    toggle_on  = function() State.fov_ring = true;  startTick("fov_ring", 0, Omen.__fovRingTick) end,
+    toggle_off = function() State.fov_ring = false; if not State.fov_visible then stopTick("fov_ring") end end,
 })
 reg("fov_size",    { slide = function(v) State.fov_size    = v end })
 reg("fov_opacity", { slide = function(v) State.fov_opacity = v end })
@@ -11482,7 +11490,16 @@ reg("fakeroll", {
 reg("bonelock",    { toggle_on=function() Omen.State.bonelock=true end,    toggle_off=function() Omen.State.bonelock=false end })
 reg("targetlock",  { toggle_on=function() Omen.State.targetlock=true end,  toggle_off=function() Omen.State.targetlock=false end })
 reg("fov_check",   { toggle_on=function() Omen.State.fov_check=true; rebuildAimbotCfg() end, toggle_off=function() Omen.State.fov_check=false; rebuildAimbotCfg() end })
-reg("fov_visible", { toggle_on=function() Omen.State.fov_visible=true; rebuildAimbotCfg() end, toggle_off=function() Omen.State.fov_visible=false; rebuildAimbotCfg() end })
+reg("fov_visible", {
+    toggle_on = function()
+        Omen.State.fov_visible = true; rebuildAimbotCfg()
+        startTick("fov_ring", 0, Omen.__fovRingTick)
+    end,
+    toggle_off = function()
+        Omen.State.fov_visible = false; rebuildAimbotCfg()
+        if not Omen.State.fov_ring then stopTick("fov_ring") end
+    end,
+})
 reg("target_peds", { toggle_on=function() Omen.State.target_peds=true; rebuildAimbotCfg() end, toggle_off=function() Omen.State.target_peds=false; rebuildAimbotCfg() end })
 reg("use_friends", { toggle_on=function() Omen.State.use_friends=true; rebuildAimbotCfg() end, toggle_off=function() Omen.State.use_friends=false; rebuildAimbotCfg() end })
 reg("max_distance", { slide=function(v) Omen.State.max_distance=v; rebuildAimbotCfg() end })
