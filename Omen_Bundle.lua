@@ -8298,6 +8298,7 @@ reg("fov_size",    { slide = function(v) State.fov_size    = v end })
 reg("fov_opacity", { slide = function(v) State.fov_opacity = v end })
 reg("crosshair", {
     toggle_on = function()
+        State.crosshair = true
         startTick("crosshair", 0, function()
             if not State.crosshair then return end
             if not Draw or type(Draw.DrawRect) ~= "function" then return end
@@ -8305,7 +8306,7 @@ reg("crosshair", {
             Draw.DrawRect(sw/2 - 1, sh/2 - 1, 2, 2, 255, 255, 255, 255)
         end)
     end,
-    toggle_off = function() stopTick("crosshair") end,
+    toggle_off = function() State.crosshair = false; stopTick("crosshair") end,
 })
 local function myVeh()
     local v = GetVehiclePedIsIn(PlayerPedId(), false)
@@ -9360,6 +9361,7 @@ reg("chatspam_int", { slide = function(v) State.__chatInt = math.max(500, tonumb
 reg("chatspam", {
     toggle_on = function()
         if type(_G.CreateThread) ~= "function" then return end
+        State.chatspam = true
         CreateThread(function()
             while State.chatspam == true and Omen.Ready do
                 local msg = State.__chatMsg or ""
@@ -9369,7 +9371,6 @@ reg("chatspam", {
                 Wait(State.__chatInt or 2000)
             end
         end)
-        State.chatspam = true
         toast("success", "Omen", "Chat spam on")
     end,
     toggle_off = function() State.chatspam = false end,
