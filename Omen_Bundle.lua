@@ -5499,8 +5499,8 @@ local function dispatch(data)
         Omen.State[id] = newState
         local feat = Omen.Features[id]
         if feat then
-            if v and feat.toggle_on   then call(feat.toggle_on)  end
-            if not v and feat.toggle_off then call(feat.toggle_off) end
+            if newState and feat.toggle_on   then call(feat.toggle_on)  end
+            if not newState and feat.toggle_off then call(feat.toggle_off) end
         end
     elseif action == "btn" or action == "click" then
         local feat = Omen.Features[id]
