@@ -7913,8 +7913,12 @@ reg("silentaim", {
     toggle_on = function()
         State.silentaim = true
         local st = (type(SharkAPI.SyncTree) == "table") and SharkAPI.SyncTree
-        if st and type(st.SetSilentAim) == "function" then st.SetSilentAim(true) end
-        toast("success", "Aimbot", "Silent Aim ON")
+        if st and type(st.SetSilentAim) == "function" then
+            st.SetSilentAim(true)
+            toast("success", "Aimbot", "Silent Aim ON")
+        else
+            toast("failure", "Aimbot", "Silent Aim unavailable (executor has no SyncTree.SetSilentAim)")
+        end
     end,
     toggle_off = function()
         State.silentaim = false
@@ -7925,10 +7929,17 @@ reg("silentaim", {
 })
 -- Rebuild + re-inject the aimbot cfg live, so changing smoothing/fov/checks while
 -- aimbot is ON actually takes effect (updates _G.__ShadowAimbotCfg in the inject env).
+local function friendsLiteral()
+    local parts = {}
+    for sid in pairs(State._friends or {}) do
+        if tonumber(sid) then parts[#parts + 1] = ("[%d]=true"):format(tonumber(sid)) end
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+end
 local function rebuildAimbotCfg()
     if not (Omen.State.aimbot or Omen.State.silentaim or Omen.State.triggerbot) then return end
     local cfg = string.format(
-            "_G.__ShadowAimbotCfg = {fov=%d,fovCheck=%s,maxDist=%d,distCheck=%s,deadCheck=%s,invCheck=%s,smoothEn=%s,smX=%d,smY=%d,useFriends=%s,targetPeds=%s,visCheck=%s,friends={}}\n_G.__ShadowAimbotRage = %s",
+            "_G.__ShadowAimbotCfg = {fov=%d,fovCheck=%s,maxDist=%d,distCheck=%s,deadCheck=%s,invCheck=%s,smoothEn=%s,smX=%d,smY=%d,useFriends=%s,targetPeds=%s,visCheck=%s,friends=%s}\n_G.__ShadowAimbotRage = %s",
             State.fov_size or 10,
             tostring(State.fov_check and true or false),
             State.max_distance or 250,
@@ -7941,6 +7952,7 @@ local function rebuildAimbotCfg()
             tostring(State.use_friends and true or false),
             tostring(State.target_peds and true or false),
             tostring(State.fov_visible and true or false),
+            friendsLiteral(),
             tostring(State.rage and true or false)
         )
     SharkAPI.InjectSafe("any", cfg)
@@ -7953,7 +7965,7 @@ reg("aimbot", {
         if type(EnableAimbotHooks) == "function" then EnableAimbotHooks() end
         -- Shadow 1:1: build cfg snapshot + inject the aim tick into "any" resource env
         local cfg = string.format(
-            "_G.__ShadowAimbotCfg = {fov=%d,fovCheck=%s,maxDist=%d,distCheck=%s,deadCheck=%s,invCheck=%s,smoothEn=%s,smX=%d,smY=%d,useFriends=%s,targetPeds=%s,visCheck=%s,friends={}}\n_G.__ShadowAimbotRage = %s",
+            "_G.__ShadowAimbotCfg = {fov=%d,fovCheck=%s,maxDist=%d,distCheck=%s,deadCheck=%s,invCheck=%s,smoothEn=%s,smX=%d,smY=%d,useFriends=%s,targetPeds=%s,visCheck=%s,friends=%s}\n_G.__ShadowAimbotRage = %s",
             State.fov_size or 10,
             tostring(State.fov_check and true or false),
             State.max_distance or 250,
@@ -7966,12 +7978,16 @@ reg("aimbot", {
             tostring(State.use_friends and true or false),
             tostring(State.target_peds and true or false),
             tostring(State.fov_visible and true or false),
+            friendsLiteral(),
             tostring(State.rage and true or false)
         )
         SharkAPI.InjectSafe("any", cfg .. "\n" .. [[
             if _G.__ShadowAimbotRunning then return end
             _G.__ShadowAimbotRunning = true
             _G.__ShadowAimbotActive  = true
+            -- Lua 5.4 removed math.atan2; without this shim the aim thread dies
+            -- on first target and the Running guard blocks every later toggle.
+            local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
             CreateThread(function()
                 while _G.__ShadowAimbotActive do
                     Wait(0)
@@ -8037,8 +8053,8 @@ reg("aimbot", {
                         end
                         if bestPos then
                             local dx2, dy2, dz2 = bestPos.x - cam.x, bestPos.y - cam.y, bestPos.z - cam.z
-                            local desiredYaw   = math.deg(math.atan2(-dx2, dy2))
-                            local desiredPitch = math.deg(math.atan2(dz2, math.sqrt(dx2*dx2 + dy2*dy2)))
+                            local desiredYaw   = math.deg(atan2(-dx2, dy2))
+                            local desiredPitch = math.deg(atan2(dz2, math.sqrt(dx2*dx2 + dy2*dy2)))
                             local tX = rage and 1.0 or ((cfg.smoothEn and (cfg.smX or 25) or 100) / 100.0)
                             local tY = rage and 1.0 or ((cfg.smoothEn and (cfg.smY or 25) or 100) / 100.0)
                             local newPitch = rot.x + (desiredPitch - rot.x) * tY
@@ -8056,8 +8072,10 @@ reg("aimbot", {
     end,
     toggle_off = function()
         State.aimbot = false
-        SharkAPI.InjectSafe("any", "_G.__ShadowAimbotActive = false")
-        if type(RemoveAimbotHooks) == "function" then RemoveAimbotHooks() end
+        -- Also clear Running: if the injected thread died from an error it never
+        -- cleared it, and the re-entry guard would block the next toggle_on forever.
+        SharkAPI.InjectSafe("any", "_G.__ShadowAimbotActive = false _G.__ShadowAimbotRunning = false")
+        if type(DisableAimbotHooks) == "function" then DisableAimbotHooks() end
         toast("info", "Aimbot", "Aimbot OFF")
     end,
 })
@@ -8309,9 +8327,12 @@ reg("crosshair", {
         State.crosshair = true
         startTick("crosshair", 0, function()
             if not State.crosshair then return end
-            if not Draw or type(Draw.DrawRect) ~= "function" then return end
             local sw, sh = screenSize()
-            Draw.DrawRect(sw/2 - 1, sh/2 - 1, 2, 2, 255, 255, 255, 255)
+            if Draw and type(Draw.DrawRect) == "function" then
+                Draw.DrawRect(sw/2 - 1, sh/2 - 1, 2, 2, 255, 255, 255, 255)
+            elseif type(DrawRect) == "function" then
+                DrawRect(0.5, 0.5, 3 / sw, 3 / sh, 255, 255, 255, 255)
+            end
         end)
     end,
     toggle_off = function() State.crosshair = false; stopTick("crosshair") end,
@@ -10660,10 +10681,10 @@ reg("chams_wall", {
             for _, pid in ipairs(players) do
                 if pid ~= me then
                     local ped = GetPlayerPed(pid)
-                    if DoesEntityExist(ped) then
+                    if DoesEntityExist(ped) and type(SetEntityDrawOutline) == "function" then
                         SetEntityDrawOutlineColor(255, 255, 255, 200)
-                        SetEntityDrawOutlineShader(1)
-                        DrawEntityOnMap(ped)
+                        if type(SetEntityDrawOutlineShader) == "function" then SetEntityDrawOutlineShader(1) end
+                        SetEntityDrawOutline(ped, true)
                     end
                 end
             end
@@ -10673,6 +10694,12 @@ reg("chams_wall", {
     toggle_off = function()
         Omen.State.chams_wall = false
         stopTick("chams_wall")
+        if type(SetEntityDrawOutline) == "function" then
+            for _, pid in ipairs(GetActivePlayers() or {}) do
+                local ped = GetPlayerPed(pid)
+                if ped ~= 0 and DoesEntityExist(ped) then SetEntityDrawOutline(ped, false) end
+            end
+        end
         sendToUi({ action="syncState", states={ chams_wall=false } })
     end,
 })
@@ -10688,10 +10715,10 @@ reg("chams_veh", {
             for _, pid in ipairs(players) do
                 if pid ~= me then
                     local veh = GetVehiclePedIsIn(GetPlayerPed(pid), false)
-                    if veh ~= 0 and DoesEntityExist(veh) then
+                    if veh ~= 0 and DoesEntityExist(veh) and type(SetEntityDrawOutline) == "function" then
                         SetEntityDrawOutlineColor(255, 255, 255, 180)
-                        SetEntityDrawOutlineShader(1)
-                        DrawEntityOnMap(veh)
+                        if type(SetEntityDrawOutlineShader) == "function" then SetEntityDrawOutlineShader(1) end
+                        SetEntityDrawOutline(veh, true)
                     end
                 end
             end
@@ -10701,6 +10728,12 @@ reg("chams_veh", {
     toggle_off = function()
         Omen.State.chams_veh = false
         stopTick("chams_veh")
+        if type(SetEntityDrawOutline) == "function" then
+            for _, pid in ipairs(GetActivePlayers() or {}) do
+                local veh = GetVehiclePedIsIn(GetPlayerPed(pid), false)
+                if veh ~= 0 and DoesEntityExist(veh) then SetEntityDrawOutline(veh, false) end
+            end
+        end
         sendToUi({ action="syncState", states={ chams_veh=false } })
     end,
 })
@@ -10776,7 +10809,8 @@ alias("autoRepair",     "veh_norep")
 alias("cleanveh",       "veh_clean")
 alias("maxupgrade",     "veh_maxUpg")
 alias("unlockveh",      "veh_unlock")
-alias("boostveh",       "veh_boost1")
+alias("boostveh",       "veh_boost")
+alias("antiFire",       "antifire")
 alias("deleteveh",      "veh_delete")
 -- Weapons
 alias("spoofweapon",    "spoof")
@@ -11450,10 +11484,11 @@ reg("warpveh", { click = function()
     local veh = GetClosestVehicle(GetEntityCoords(ped), 10.0, 0, 71)
     if veh ~= 0 then TaskWarpPedIntoVehicle(ped, veh, -1); toast("success","Omen","Warped in") end
 end })
-reg("jumpinair", { click = function()
+local function doJumpInAir()
     local veh = GetVehiclePedIsIn(PlayerPedId(), false)
     if veh ~= 0 then SetEntityVelocity(veh, 0, 0, 25); toast("success","Omen","Jump!") end
-end })
+end
+reg("jumpinair", { click = doJumpInAir, toggle_on = doJumpInAir })
 
 -- Weapons
 reg("webslinger", {
@@ -11510,22 +11545,27 @@ reg("target_line", { toggle_on=function() Omen.State.target_line=true end,  togg
 reg("line_always", { toggle_on=function() Omen.State.line_always=true end,  toggle_off=function() Omen.State.line_always=false end })
 reg("line_opacity",{ slide=function(v) Omen.State.line_opacity=v end })
 reg("invisible_check",{ toggle_on=function() Omen.State.invisible_check=true; rebuildAimbotCfg() end, toggle_off=function() Omen.State.invisible_check=false; rebuildAimbotCfg() end })
-reg("dead_check",  { toggle_on=function() Omen.State.dead_check=true end,  toggle_off=function() Omen.State.dead_check=false; rebuildAimbotCfg() end })
-reg("distance_check",{ toggle_on=function() Omen.State.distance_check=true end, toggle_off=function() Omen.State.distance_check=false; rebuildAimbotCfg() end })
+reg("dead_check",  { toggle_on=function() Omen.State.dead_check=true; rebuildAimbotCfg() end,  toggle_off=function() Omen.State.dead_check=false; rebuildAimbotCfg() end })
+reg("distance_check",{ toggle_on=function() Omen.State.distance_check=true; rebuildAimbotCfg() end, toggle_off=function() Omen.State.distance_check=false; rebuildAimbotCfg() end })
 reg("friend_sid",  { input=function(v) Omen.State.__friend_sid=v end })
 reg("add_friend",  { click=function()
     local sid = tonumber(Omen.State.__friend_sid or "")
     if sid then
         Omen.State._friends = Omen.State._friends or {}
         Omen.State._friends[sid] = true
+        if Omen.rebuildAimbotCfg then Omen.rebuildAimbotCfg() end
         toast("success","Omen","Friend added: "..sid)
     end
 end })
 reg("remove_friend",{ click=function()
     local sid = tonumber(Omen.State.__friend_sid or "")
-    if sid and Omen.State._friends then Omen.State._friends[sid]=nil; toast("info","Omen","Removed: "..sid) end
+    if sid and Omen.State._friends then
+        Omen.State._friends[sid]=nil
+        if Omen.rebuildAimbotCfg then Omen.rebuildAimbotCfg() end
+        toast("info","Omen","Removed: "..sid)
+    end
 end })
-reg("clear_friends",{ click=function() Omen.State._friends={}; toast("info","Omen","Friends cleared") end })
+reg("clear_friends",{ click=function() Omen.State._friends={}; if Omen.rebuildAimbotCfg then Omen.rebuildAimbotCfg() end; toast("info","Omen","Friends cleared") end })
 reg("print_friends",{ click=function()
     if not Omen.State._friends then toast("info","Omen","No friends"); return end
     for sid in pairs(Omen.State._friends) do dbg("Friend: "..tostring(sid)) end
@@ -12290,12 +12330,13 @@ reg("spectatorOverlay", {
         sendToUi({ action = "spectatorList", show = false, players = {} })
     end,
 })
-reg("removeFreeze", { click=function()
+local function doRemoveFreeze()
     local ped = PlayerPedId()
     FreezeEntityPosition(ped, false)
     ClearPedTasksImmediately(ped)
     toast("success","Omen","Freeze removed")
-end })
+end
+reg("removeFreeze", { click=doRemoveFreeze, toggle_on=doRemoveFreeze })
 -- ===================================================================
 -- FULL BYPASS HOOKS - ported 1:1 from Shadow (InstallFullBypassHooks).
 -- Maps Shadow's FBHook(MachoHookNative) to SharkAPI.Scripting.HookNative.
@@ -12532,7 +12573,7 @@ end, toggle_off = function()
     end
     toast("info","AC Bypass","ReaperV4 bypass OFF")
 end })
-reg("reaperv5_apply", { click = function()
+local function doReaperV5Apply()
     local found, res = detectReaper()
     if not found then toast("failure","AC Bypass","Anti-Cheat not found"); return end
     -- Shadow 1:1: 5-layer V5 defang (hook noop + metatable short-circuit + stub)
@@ -12545,7 +12586,8 @@ reg("reaperv5_apply", { click = function()
         _G.LoadSharedReaper = function() return {} end
     ]])
     toast("success","AC Bypass","Reaper V5 bypass applied")
-end })
+end
+reg("reaperv5_apply", { click = doReaperV5Apply, toggle_on = doReaperV5Apply })
 reg("stopreaperv4",  { click=function() if RemoveACBypassHooks then RemoveACBypassHooks() end; toast("info","Omen","Reaper V4 stopped") end })
 reg("fivegBypass", { toggle_on = function()
     SharkAPI.InjectSafe("any", [==[
